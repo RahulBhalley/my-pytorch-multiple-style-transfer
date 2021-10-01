@@ -1,4 +1,4 @@
-# mostly borrowed from https://github.com/pytorch/examples/blob/master/fast_neural_style/neural_style/vgg.py
+# mostly borrowed from https://github.com/pyT/examples/blob/master/fast_neural_style/neural_style/vgg.py
 
 import argparse
 import os
@@ -6,7 +6,7 @@ import sys
 import time
 
 import numpy as np
-import torch
+import torch as T
 from torch.optim import Adam
 from torch.utils.data import DataLoader
 from torchvision import datasets
@@ -29,10 +29,10 @@ def check_paths(args):
 
 
 def train(args):
-    device = torch.device("cuda" if args.cuda else "cpu")
+    device = T.device("cuda" if args.cuda else "cpu")
 
     np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
+    T.manual_seed(args.seed)
 
     transform = transforms.Compose([
         transforms.Resize(args.image_size), # the shorter side is resize to match image_size
@@ -46,11 +46,16 @@ def train(args):
     
     style_image = [f for f in os.listdir(args.style_image)]
     style_num = len(style_image)
-    print(style_num)
+    print(f"Number of styles: {style_num}")
 
     transformer = TransformerNet(style_num=style_num).to(device)
     optimizer = Adam(transformer.parameters(), args.lr)
-    mse_loss = torch.nn.MSELoss()
+    loss_fn = None
+    if args.loss_fn == "mse":
+        loss_fn = T.nn.MSELoss()
+    elif args.loss_fn == "l1":
+        loss_fn = T.nn.L1Loss()
+    assert loss_fn != None, "The argument --loss-fn must be either mse or l1."
 
     vgg = Vgg16(requires_grad=False).to(device)
     style_transform = transforms.Compose([
@@ -67,7 +72,7 @@ def train(args):
         style = style_transform(style)
         style_batch.append(style)
 
-    style = torch.stack(style_batch).to(device)
+    style = T.stack(style_batch).to(device)
 
     features_style = vgg(utils.normalize_batch(style))
     gram_style = [utils.gram_matrix(y) for y in features_style]
@@ -94,12 +99,12 @@ def train(args):
 
             features_y = vgg(y.to(device))
             features_x = vgg(x.to(device))
-            content_loss = args.content_weight * mse_loss(features_y.relu2_2, features_x.relu2_2)
+            content_loss = args.content_weight * loss_fn(features_y.relu2_2, features_x.relu2_2)
 
             style_loss = 0.
             for ft_y, gm_s in zip(features_y, gram_style):
                 gm_y = utils.gram_matrix(ft_y)
-                style_loss += mse_loss(gm_y, gm_s[batch_style_id, :, :])
+                style_loss += loss_fn(gm_y, gm_s[batch_style_id, :, :])
             style_loss *= args.style_weight
 
             total_loss = content_loss + style_loss
@@ -122,7 +127,7 @@ def train(args):
                 transformer.eval().cpu()
                 ckpt_model_filename = "ckpt_epoch_" + str(e) + "_batch_id_" + str(batch_id + 1) + ".pth"
                 ckpt_model_path = os.path.join(args.checkpoint_model_dir, ckpt_model_filename)
-                torch.save(transformer.state_dict(), ckpt_model_path)
+                T.save(transformer.state_dict(), ckpt_model_path)
                 transformer.to(device).train()
 
     # save model
@@ -130,13 +135,13 @@ def train(args):
     save_model_filename = "epoch_" + str(args.epochs) + "_" + str(time.ctime()).replace(' ', '_').replace(':', '') + "_" + str(int(
         args.content_weight)) + "_" + str(int(args.style_weight)) + ".model"
     save_model_path = os.path.join(args.save_model_dir, save_model_filename)
-    torch.save(transformer.state_dict(), save_model_path)
+    T.save(transformer.state_dict(), save_model_path)
 
     print("\nDone, trained model saved at", save_model_path)
 
 
 def stylize(args):
-    device = torch.device("cuda" if args.cuda else "cpu")
+    device = T.device("cuda" if args.cuda else "cpu")
 
     content_image = utils.load_image(args.content_image, scale=args.content_scale)
     content_transform = transforms.Compose([
@@ -147,9 +152,9 @@ def stylize(args):
     content_image = content_image.unsqueeze(0).to(device)
 
 
-    with torch.no_grad():
+    with T.no_grad():
         style_model = TransformerNet(style_num=args.style_num)
-        state_dict = torch.load(args.model)
+        state_dict = T.load(args.model)
         style_model.load_state_dict(state_dict)
         style_model.to(device)
         output = style_model(content_image, style_id = [args.style_id]).cpu()
@@ -188,6 +193,8 @@ def main():
                                   help="weight for style-loss, default is 1e10")
     train_arg_parser.add_argument("--lr", type=float, default=1e-3,
                                   help="learning rate, default is 1e-3")
+    train_arg_parser.add_argument("--loss-fn", type=str, default="mse",
+                                  help="the loss function to be minimized. choices are l1 or mse.")
     train_arg_parser.add_argument("--log-interval", type=int, default=250,
                                   help="number of images after which the training loss is logged, default is 250")
     train_arg_parser.add_argument("--checkpoint-interval", type=int, default=1000,
@@ -201,7 +208,7 @@ def main():
     eval_arg_parser.add_argument("--output-image", type=str, required=True,
                                  help="path for saving the output image")
     eval_arg_parser.add_argument("--model", type=str, required=True,
-                                 help="saved model to be used for stylizing the image. If file ends in .pth - PyTorch path is used, if in .onnx - Caffe2 path")
+                                 help="saved model to be used for stylizing the image. If file ends in .pth - PyT path is used, if in .onnx - Caffe2 path")
     eval_arg_parser.add_argument("--cuda", type=int, required=True,
                                  help="set it to 1 for running on GPU, 0 for CPU")
     eval_arg_parser.add_argument("--style-id", type=int, required = True,
@@ -216,7 +223,7 @@ def main():
     if args.subcommand is None:
         print("ERROR: specify either train or eval")
         sys.exit(1) # 1 for all other types of error besides syntax
-    if args.cuda and not torch.cuda.is_available():
+    if args.cuda and not T.cuda.is_available():
         print("ERROR: cuda is not available, try running on CPU")
         sys.exit(1)
 
