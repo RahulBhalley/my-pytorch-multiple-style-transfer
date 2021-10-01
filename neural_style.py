@@ -133,7 +133,7 @@ def train(args):
     # save model
     transformer.eval().cpu()
     save_model_filename = "epoch_" + str(args.epochs) + "_" + str(time.ctime()).replace(' ', '_').replace(':', '') + "_" + str(int(
-        args.content_weight)) + "_" + str(int(args.style_weight)) + ".model"
+        args.content_weight)) + "_" + str(int(args.style_weight)) + ".pt"
     save_model_path = os.path.join(args.save_model_dir, save_model_filename)
     T.save(transformer.state_dict(), save_model_path)
 
